@@ -1,0 +1,6 @@
+# Kiro 개발 설정 (로컬 전용)
+.kiro/
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
