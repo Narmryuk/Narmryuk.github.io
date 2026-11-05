@@ -407,9 +407,10 @@ async function startGame(gameId) {
       }
     });
 
-  // 5) 카운트다운 시작 (서버 deadline 기준)
+  // 5) 카운트다운 시작 (서버 시각 오프셋 보정 — 로컬 시계 오차 무시)
   showGameView('playing');
   setPlayMsg('');
+  await refreshClockOffset();   // 서버-로컬 시계 차 계산
   startCountdown(new Date(g.deadline).getTime());
 }
 
@@ -421,13 +422,27 @@ async function fetchNicknames(ids) {
   return map;
 }
 
-// 서버 deadline 기준 카운트다운 (로컬 시계 오프셋 보정)
-// 매칭 시 받은 deadline 과 로컬 now 의 차이를 그대로 사용 (서버-클라 시계 차는
-// deadline 자체가 서버 기준이므로, 남은 시간 = deadline - Date.now() 로 근사).
+// 서버-로컬 시계 오프셋 (ms). serverNow = Date.now() + clockOffset.
+let clockOffset = 0;
+async function refreshClockOffset() {
+  try {
+    const t0 = Date.now();
+    const { data, error } = await supabase.rpc('server_now');
+    const t1 = Date.now();
+    if (error || !data) return;              // 실패 시 offset 0 (로컬 시계 사용)
+    const serverMs = new Date(data).getTime();
+    const rtt = t1 - t0;                     // 왕복 지연
+    // 서버 응답 시점의 로컬 시각을 (t0+rtt/2) 로 근사 -> 그 차이가 offset
+    clockOffset = serverMs - (t0 + rtt / 2);
+  } catch (_) { /* offset 0 유지 */ }
+}
+function serverNow() { return Date.now() + clockOffset; }
+
+// 서버 deadline 기준 카운트다운 (serverNow 로 로컬 시계 오차 보정)
 function startCountdown(deadlineMs) {
   clearInterval(countdownTimer);
   function tick() {
-    const remain = Math.max(0, Math.ceil((deadlineMs - Date.now()) / 1000));
+    const remain = Math.max(0, Math.ceil((deadlineMs - serverNow()) / 1000));
     countdownEl.textContent = remain;
     countdownEl.classList.toggle('urgent', remain <= 5 && remain > 0);
     if (remain <= 0) {
